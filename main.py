@@ -7,6 +7,7 @@ import smtplib
 import random
 import uuid
 import getpass
+import json
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 from email.mime.text import MIMEText
@@ -24,6 +25,7 @@ def getUniqueId():
     return uuid.uuid4() #Generate UUID according to RFC 4122
 
 def pull_csv():
+    print("Attempting to sign into google drive...")
     gauth = GoogleAuth()
     gauth.LocalWebserverAuth()
     drive = GoogleDrive(gauth)
@@ -35,13 +37,41 @@ def pull_csv():
     f.GetContentFile(filename, mimetype='text/csv')  # Save Drive file as a local file
     return filename
 
-def parse_csv(f): #expects a csv file
+def get_emails(names, emails_dict):
+    emails = []
+    for name in names:
+        try:
+            emails.append(emails_dict[name])
+        except Exception:
+            continue
+    return emails
+
+
+def parse_csv(f, emails_dict): #expects a csv file
     data = list(f)
+    emails =  get_emails([data[1][1].lower(), data[2][1].lower()], emails_dict)
+    sendAppointment(emails, next_monday(dt.datetime.combine(dt.datetime.now(), dt.time(11))))
+    # print(data[1][2], data[2][2]) #11:00 on tuesday
+    # print(data[3][1], data[4][1]) # 2:00 on Monday
+    # print(data[12][1]) #before 5 on Saturday
+    # print(data[12][2]) # before 5 on Sunday
 
 def prompt_creds():
-    username = input("Enter outlook username:")
+    username = input("Enter WPI email:")
     password = getpass.getpass()
     return username, password
+
+def next_monday(d):
+    days_ahead = 0 - d.weekday()
+    if days_ahead <= 0: # Target day already happened this week
+        days_ahead += 7
+    return d + dt.timedelta(days_ahead)
+
+def read_json(filename):
+    f = open(filename)
+    data = json.load(f)
+    emails = data['brothers']
+    return emails
 
 def sendAppointment(attendees, dtstart):
     #Login to SMTP server
@@ -51,28 +81,32 @@ def sendAppointment(attendees, dtstart):
     s.starttls()
     s.ehlo()
     username, password = prompt_creds()
-    s.login(username, password)
-
+    try:
+        s.login(username, password)
+    except smtplib.SMTPAuthenticationError:
+        print("Invalid credentials. Please try again.")
+        quit()
 
     # Timezone to use for our dates - change as needed
     tz = pytz.timezone("US/Eastern")
     reminderHours = 1
-    start = tz.localize(dtstart)
+    description = "wash dishes"
     cal = icalendar.Calendar()
     cal.add('prodid', '-//My calendar application//example.com//')
     cal.add('version', '2.0')
     cal.add('method', "REQUEST")
     event = icalendar.Event()
-    # event.add('attendee', 'enschneider@wpi.edu') 
-    # event.add('organizer', "dalarson@wpi.edu")
+    for attendee in attendees:
+        event.add('attendee', attendee)
+    event.add('organizer', username)
     event.add('status', "confirmed")
     event.add('category', "Event")
-    event.add('summary', subj)
+    event.add('summary', "wash n wait")
     event.add('description', description)
     event.add('location', "SigEp Kitchen")
-    event.add('dtstart', start)
-    event.add('dtend', tz.localize(dt.datetime.combine(dt.date.today(), dt.time(startHour + 1, 0, 0))))
-    event.add('dtstamp', tz.localize(dt.datetime.combine(dt.date.today(), dt.time(6, 0, 0))))
+    event.add('dtstart', dtstart)
+    event.add('dtend', dtstart + dt.timedelta(hours=1))
+    event.add('dtstamp', tz.localize(dt.datetime.now()))
     event['uid'] = getUniqueId() # Generate some unique ID
     event.add('priority', 5)
     event.add('sequence', 1)
@@ -86,9 +120,9 @@ def sendAppointment(attendees, dtstart):
     event.add_component(alarm)
     cal.add_component(event)
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = subj
-    msg["From"] = "dalarson@wpi.edu"
-    msg['To'] = ", ".join(['enschneider@wpi.edu'])
+    msg["Subject"] = "Wash 'n' Wait"
+    msg["From"] = username
+    msg['To'] = " ".join(attendees)
     msg["Content-class"] = "urn:content-classes:calendarmessage"
     msg.attach(MIMEText(description))
     filename = "invite.ics"
@@ -103,21 +137,23 @@ def sendAppointment(attendees, dtstart):
     
     try:
         # s.sendmail(msg["From"], msg["To"], msg.as_string()) 
-        pass
+        print("would send mail HERE")
     except smtplib.SMTPDataError:
         print("SMTP failed to send the invite. SMTPDataError Thrown. You cannot send a calendar invite to the account you have logged in with.") 
-    except Exception:
-        print("SMTP failed to send the invite.")
+    except Exception as e:
+        print("SMTP failed to send the invite:", e)
     else: 
         print("Outlook invitation successfully sent to", msg['To'])
     s.quit()
 
 
 def main():
-    # filename = pull_csv()
     filename = 'washnwait.csv'
+    filename = pull_csv()
     f = open_csv(filename)
-    parse_csv(f)
+    emails_dict = read_json('emails.json')
+    parse_csv(f, emails_dict)
+
     # sendAppointment('fuck', dt.date.today())
     
 

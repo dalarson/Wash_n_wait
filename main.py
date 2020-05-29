@@ -18,7 +18,7 @@ from email.encoders import encode_base64
 def open_csv(filename):
     f = open(filename, newline='')
     csvfile = csv.reader(f, delimiter=',', quotechar='|')
-    print(filename, 'loaded.')
+    print("Local file", filename, 'loaded.')
     return csvfile
 
 def getUniqueId():
@@ -35,6 +35,7 @@ def pull_csv():
     print('Downloading file %s from Google Drive' % f['title'])
     filename = 'washnwait.csv'
     f.GetContentFile(filename, mimetype='text/csv')  # Save Drive file as a local file
+    print(filename, "has been downloaded from google drive.")
     return filename
 
 def get_emails(names, emails_dict):
@@ -91,6 +92,7 @@ def sendAppointment(attendees, dtstart):
     tz = pytz.timezone("US/Eastern")
     reminderHours = 1
     description = "wash dishes"
+    start = tz.localize(dtstart)
     cal = icalendar.Calendar()
     cal.add('prodid', '-//My calendar application//example.com//')
     cal.add('version', '2.0')
@@ -104,8 +106,8 @@ def sendAppointment(attendees, dtstart):
     event.add('summary', "wash n wait")
     event.add('description', description)
     event.add('location', "SigEp Kitchen")
-    event.add('dtstart', dtstart)
-    event.add('dtend', dtstart + dt.timedelta(hours=1))
+    event.add('dtstart', start)
+    event.add('dtend', start + dt.timedelta(hours=1))
     event.add('dtstamp', tz.localize(dt.datetime.now()))
     event['uid'] = getUniqueId() # Generate some unique ID
     event.add('priority', 5)
@@ -134,10 +136,13 @@ def sendAppointment(attendees, dtstart):
     part.add_header("Filename", filename)
     part.add_header("Path", filename)
     msg.attach(part)
+    send = input("Are you sure you want to send invitations? (type \"yes\" to send) ")
     
+    if send.lower() != "yes":
+        quit()
     try:
-        # s.sendmail(msg["From"], msg["To"], msg.as_string()) 
-        print("would send mail HERE")
+        s.sendmail(msg["From"], msg["To"], msg.as_string()) 
+        # print("would send mail HERE")
     except smtplib.SMTPDataError:
         print("SMTP failed to send the invite. SMTPDataError Thrown. You cannot send a calendar invite to the account you have logged in with.") 
     except Exception as e:
@@ -149,7 +154,9 @@ def sendAppointment(attendees, dtstart):
 
 def main():
     filename = 'washnwait.csv'
-    filename = pull_csv()
+    pull = input("Do you want to pull wash n wait schedule from google drive? (type \"yes\" to pull down) ")
+    if pull.lower() == "yes":
+        filename = pull_csv()
     f = open_csv(filename)
     emails_dict = read_json('emails.json')
     parse_csv(f, emails_dict)
